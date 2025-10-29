@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,14 +72,15 @@ type Controller struct {
 	podsSynced             cache.InformerSynced
 	addOrUpdatePodQueue    workqueue.TypedRateLimitingInterface[string]
 	deletePodQueue         workqueue.TypedRateLimitingInterface[string]
-	deletingPodObjMap      *xsync.MapOf[string, *corev1.Pod]
-	deletingNodeObjMap     *xsync.MapOf[string, *corev1.Node]
+	deletingPodObjMap      *xsync.Map[string, *corev1.Pod]
+	deletingNodeObjMap     *xsync.Map[string, *corev1.Node]
 	updatePodSecurityQueue workqueue.TypedRateLimitingInterface[string]
 	podKeyMutex            keymutex.KeyMutex
 
 	vpcsLister           kubeovnlister.VpcLister
 	vpcSynced            cache.InformerSynced
 	addOrUpdateVpcQueue  workqueue.TypedRateLimitingInterface[string]
+	vpcLastPoliciesMap   *xsync.Map[string, string]
 	delVpcQueue          workqueue.TypedRateLimitingInterface[*kubeovnv1.Vpc]
 	updateVpcStatusQueue workqueue.TypedRateLimitingInterface[string]
 	vpcKeyMutex          keymutex.KeyMutex
@@ -110,6 +111,7 @@ type Controller struct {
 	subnetsLister           kubeovnlister.SubnetLister
 	subnetSynced            cache.InformerSynced
 	addOrUpdateSubnetQueue  workqueue.TypedRateLimitingInterface[string]
+	subnetLastVpcNameMap    *xsync.Map[string, string]
 	deleteSubnetQueue       workqueue.TypedRateLimitingInterface[*kubeovnv1.Subnet]
 	updateSubnetStatusQueue workqueue.TypedRateLimitingInterface[string]
 	syncVirtualPortsQueue   workqueue.TypedRateLimitingInterface[string]
@@ -346,14 +348,15 @@ func Run(ctx context.Context, config *Configuration) {
 	}
 	controller := &Controller{
 		config:             config,
-		deletingPodObjMap:  xsync.NewMapOf[string, *corev1.Pod](),
-		deletingNodeObjMap: xsync.NewMapOf[string, *corev1.Node](),
+		deletingPodObjMap:  xsync.NewMap[string, *corev1.Pod](),
+		deletingNodeObjMap: xsync.NewMap[string, *corev1.Node](),
 		ipam:               ovnipam.NewIPAM(),
 		namedPort:          NewNamedPort(),
 
 		vpcsLister:           vpcInformer.Lister(),
 		vpcSynced:            vpcInformer.Informer().HasSynced,
 		addOrUpdateVpcQueue:  newTypedRateLimitingQueue[string]("AddOrUpdateVpc", nil),
+		vpcLastPoliciesMap:   xsync.NewMap[string, string](),
 		delVpcQueue:          newTypedRateLimitingQueue[*kubeovnv1.Vpc]("DeleteVpc", nil),
 		updateVpcStatusQueue: newTypedRateLimitingQueue[string]("UpdateVpcStatus", nil),
 		vpcKeyMutex:          keymutex.NewHashed(numKeyLocks),
@@ -373,6 +376,7 @@ func Run(ctx context.Context, config *Configuration) {
 		subnetsLister:           subnetInformer.Lister(),
 		subnetSynced:            subnetInformer.Informer().HasSynced,
 		addOrUpdateSubnetQueue:  newTypedRateLimitingQueue[string]("AddSubnet", nil),
+		subnetLastVpcNameMap:    xsync.NewMap[string, string](),
 		deleteSubnetQueue:       newTypedRateLimitingQueue[*kubeovnv1.Subnet]("DeleteSubnet", nil),
 		updateSubnetStatusQueue: newTypedRateLimitingQueue[string]("UpdateSubnetStatus", nil),
 		syncVirtualPortsQueue:   newTypedRateLimitingQueue[string]("SyncVirtualPort", nil),
