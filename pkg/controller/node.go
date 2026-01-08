@@ -59,19 +59,45 @@ func nodeReady(node *v1.Node) bool {
 	return ready && !networkUnavailable
 }
 
+func ovnAnnotations(annotations map[string]string) map[string]string {
+	const prefix = "ovn.kubernetes.io"
+	var a map[string]string
+
+	if len(annotations) == 0 {
+		return map[string]string{}
+	}
+
+	for k := range annotations {
+		if strings.HasPrefix(k, prefix) {
+			if a == nil {
+				a = make(map[string]string)
+			}
+			a[k] = annotations[k]
+		}
+	}
+
+	if a == nil {
+		return map[string]string{}
+	}
+	return a
+}
+
 func (c *Controller) enqueueUpdateNode(oldObj, newObj interface{}) {
 	oldNode := oldObj.(*v1.Node)
 	newNode := newObj.(*v1.Node)
 
+	oldNodeAnnotations := ovnAnnotations(oldNode.Annotations)
+	newNodeAnnotations := ovnAnnotations(newNode.Annotations)
+
 	if nodeReady(oldNode) != nodeReady(newNode) ||
-		!reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) {
+		!reflect.DeepEqual(oldNodeAnnotations, newNodeAnnotations) {
 		var key string
 		var err error
 		if key, err = cache.MetaNamespaceKeyFunc(newObj); err != nil {
 			utilruntime.HandleError(err)
 			return
 		}
-		if len(newNode.Annotations) == 0 || newNode.Annotations[util.AllocatedAnnotation] != "true" {
+		if len(newNodeAnnotations) == 0 || newNode.Annotations[util.AllocatedAnnotation] != "true" {
 			klog.V(3).Infof("enqueue add node %s", key)
 			c.addNodeQueue.Add(key)
 		} else {
